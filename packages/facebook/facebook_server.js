@@ -106,3 +106,50 @@ var getIdentity = function (accessToken, fields) {
 Facebook.retrieveCredential = function(credentialToken, credentialSecret) {
   return OAuth.retrieveCredential(credentialToken, credentialSecret);
 };
+
+/*
+ * Get the access token to identify our app with facebook
+ * (it should only run once since we cache the result and there don't seem to be an expiration on the token)
+ */
+let appAccessToken = null;
+const getAppAccessToken = () => {
+  if (!appAccessToken) {
+    const config = ServiceConfiguration.configurations.findOne({ service: 'facebook' });
+    const response = HTTP.get(
+      'https://graph.facebook.com/oauth/access_token', {
+        params: {
+          client_id: config.appId,
+          client_secret: OAuth.openSecret(config.secret),
+          grant_type: 'client_credentials',
+        },
+      }).content;
+    appAccessToken = response.replace('access_token=', '');
+  }
+  return appAccessToken;
+};
+
+/*
+ * Returns the expiration (unix time in ms) of the given token
+ * If the token is not valid, this function will fail
+ */
+Facebook.getTokenExpiration = (fbAccessToken) => {
+  let expiresAt;
+  try {
+    expiresAt = JSON.parse(HTTP.get('https://graph.facebook.com/debug_token', {
+      params: {
+        input_token: fbAccessToken,
+        access_token: getAppAccessToken(),
+      },
+    }).content).data.expires_at * 1000;
+  } catch (e) {
+    if (e.response) {
+      const errorType = JSON.parse(e.response.content).error.type;
+      if (errorType === 'OAuthException') {
+        throw new Error('Facebook access token is not valid');
+      }
+    } else {
+      throw(e); 
+    }
+  }
+  return expiresAt;
+};
